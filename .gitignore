@@ -1,0 +1,35 @@
+# Entorno virtual Python
+.venv/
+env/
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Datos pesados (mantener estructura con .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Modelos binarios grandes (se gestionan en releases o exportación final)
+models/*.pt
+models/*.pth
+# Permitir exportación ligera final de onnx si pesa < 50MB
+# models/*.onnx
+
+# Variables de entorno y credenciales
+.env
+*.env.local
+
+# IDEs y SO
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
