@@ -56,27 +56,31 @@ MCP_MrRose/
 
 ---
 
-## 🚀 Inicio Rápido (Fase 1: Preparación de Datos)
+## 🚀 Cómo Ejecutar el Sistema
 
-### 1. Activar el Entorno Virtual
-En Windows PowerShell:
+### 1. Iniciar el Servidor MCP (Model Context Protocol)
+Para clientes MCP como Antigravity, Claude Desktop o agentes:
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m src.mcp_server.server
 ```
 
-### 2. Instalar dependencias base
+### 2. Iniciar la API REST / Gateway para App Móvil
+Para conectar tu aplicación móvil o probar desde Swagger UI:
 ```powershell
-pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn src.mcp_server.api:app --reload --host 0.0.0.0 --port 8000
 ```
+* **Documentación interactiva (Swagger):** Abre tu navegador en [http://localhost:8000/docs](http://localhost:8000/docs)
+* **Endpoint para fotos de la cámara:** `POST /api/v1/diagnose/file`
+* **Endpoint para base64:** `POST /api/v1/diagnose/base64`
 
-### 3. Cargar los Datasets
-Coloca los archivos `.zip` descargados de Kaggle o Mendeley en `data/raw/` y ejecuta:
-```powershell
-python scripts/import_dataset.py
-```
+---
 
-### 4. Normalizar y Particionar
-```powershell
-python scripts/prepare_data.py
-```
-Esto creará la partición estratificada 70/15/15 en `data/processed/` y generará `dataset_summary.json`.
+## 📊 Resultados de la Evaluación del Modelo en TEST (2,092 imágenes)
+* **Accuracy Global:** **96.41%**
+* **F1-Score Ponderado:** **0.97**
+* **Oídio:** Precision 100% | Recall 100%
+* **Roya:** Precision 100% | Recall 100%
+* **Mancha Negra:** Precision 100% | Recall 99%
+* **Vello:** Precision 98% | Recall 100%
+* **Sano:** Precision 99% | Recall 93%
+* **Botrytis:** Precision 57% | Recall 93%
