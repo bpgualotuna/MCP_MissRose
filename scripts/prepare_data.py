@@ -28,6 +28,7 @@ CLASS_SYNONYMS = {
 
     # Botrytis
     "botrytis": "botrytis",
+    "botrytis_blight": "botrytis",
     "botrytis_cinerea": "botrytis",
     "gray_mold": "botrytis",
     "grey_mold": "botrytis",
@@ -103,6 +104,10 @@ def process_dataset(raw_dir: Path, output_dir: Path, split_ratios=(0.70, 0.15, 0
 
     for root, dirs, files in os.walk(raw_dir):
         root_path = Path(root)
+        # Ignorar exclusivamente subcarpetas de marigold (caléndula)
+        if any(part.lower() == "marigold" for part in root_path.parts):
+            continue
+
         current_class = normalize_class_name(root_path.name)
         if current_class == "desconocido" and root_path.parent != raw_dir:
             current_class = normalize_class_name(root_path.parent.name)
