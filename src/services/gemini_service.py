@@ -91,16 +91,19 @@ REGLAS CRÍTICAS DE DIAGNÓSTICO:
         self,
         image: Image.Image,
         classifier_probs: Dict[str, float],
-        context_notes: Optional[str] = None
+        context_notes: Optional[str] = None,
+        second_image: Optional[Image.Image] = None
     ) -> Dict[str, Any]:
         """
-        Envía la imagen a Gemini con la base de conocimiento y el vector de probabilidades local.
+        Envía la imagen (y una segunda toma opcional de envés/otro ángulo) a Gemini
+        con la base de conocimiento y el vector de probabilidades local.
         """
+        has_second_image = second_image is not None
         if not self.is_available():
             # Fallback en caso de no tener API Key configurada
-            return self._heuristic_fallback(classifier_probs)
+            return self._heuristic_fallback(classifier_probs, has_second_image=has_second_image)
 
-        # Convertir imagen PIL a bytes JPEG
+        # Convertir imagen principal PIL a bytes JPEG
         buffered = io.BytesIO()
         image.convert("RGB").save(buffered, format="JPEG", quality=90)
         img_bytes = buffered.getvalue()
@@ -113,16 +116,30 @@ REGLAS CRÍTICAS DE DIAGNÓSTICO:
         if context_notes:
             prompt_usuario += f"\nNotas contextuales del agricultor: {context_notes}\n"
 
-        prompt_usuario += "\nProporciona el diagnóstico agronómico estructurado en formato JSON estricto."
-
         try:
             from google.genai import types
+            request_contents = [
+                types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+            ]
+            if second_image is not None:
+                second_buffered = io.BytesIO()
+                second_image.convert("RGB").save(second_buffered, format="JPEG", quality=90)
+                second_img_bytes = second_buffered.getvalue()
+                request_contents.append(
+                    types.Part.from_bytes(data=second_img_bytes, mime_type="image/jpeg")
+                )
+                prompt_usuario += (
+                    "\nSe adjunta una SEGUNDA IMAGEN correspondiente al segundo ángulo / envés foliar "
+                    "solicitado para desempate diferencial. Evalúa ambas imágenes en conjunto y emite "
+                    "un diagnóstico definitivo con \"requiere_segunda_foto\": false.\n"
+                )
+
+            prompt_usuario += "\nProporciona el diagnóstico agronómico estructurado en formato JSON estricto."
+            request_contents.append(prompt_usuario)
+
             response = self.client.models.generate_content(
                 model="gemini-3.5-flash-lite",
-                contents=[
-                    types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
-                    prompt_usuario
-                ],
+                contents=request_contents,
                 config=types.GenerateContentConfig(
                     system_instruction=self.build_system_prompt(),
                     response_mime_type="application/json",
@@ -131,15 +148,22 @@ REGLAS CRÍTICAS DE DIAGNÓSTICO:
             )
 
             result = json.loads(response.text)
+            if has_second_image:
+                result["requiere_segunda_foto"] = False
             return result
         except Exception as e:
             print(f"[!] Error al llamar a Gemini: {e}. Activando motor heurístico de respaldo.")
-            return self._heuristic_fallback(classifier_probs, error_note=str(e))
+            return self._heuristic_fallback(
+                classifier_probs,
+                error_note=str(e),
+                has_second_image=has_second_image
+            )
 
     def _heuristic_fallback(
         self,
         classifier_probs: Dict[str, float],
-        error_note: Optional[str] = None
+        error_note: Optional[str] = None,
+        has_second_image: bool = False
     ) -> Dict[str, Any]:
         """
         Motor de respaldo cuando no hay conexión con Gemini.
@@ -153,7 +177,9 @@ REGLAS CRÍTICAS DE DIAGNÓSTICO:
         info = CATALOGO_ENFERMEDADES.get(top_class, CATALOGO_ENFERMEDADES["sano"])
 
         # Regla de segunda foto guiada: si confianza < 0.80 o si el segundo lugar está cerca
-        requiere_segunda = top_conf < 0.80 or (top_conf - second_conf < 0.25 and top_class != "sano")
+        requiere_segunda = (not has_second_image) and (
+            top_conf < 0.80 or (top_conf - second_conf < 0.25 and top_class != "sano")
+        )
         guia_captura = None
 
         if requiere_segunda and info.regla_segunda_foto:

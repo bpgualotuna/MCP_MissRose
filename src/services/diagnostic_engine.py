@@ -47,28 +47,38 @@ class DiagnosticEngine:
     def diagnose(
         self,
         image_input: Union[str, Path, bytes, Image.Image],
-        context_notes: Optional[str] = None
+        context_notes: Optional[str] = None,
+        second_image_input: Optional[Union[str, Path, bytes, Image.Image]] = None
     ) -> Dict[str, Any]:
         """
         Flujo completo de diagnóstico:
-        1. Carga y valida imagen.
+        1. Carga y valida imagen (y segunda toma opcional del envés/segundo ángulo).
         2. Inferencia cuantitativa local (ONNX).
         3. Enriquecimiento fitopatológico y razonamiento (Gemini / Reglas Ecuador).
         """
         image = self._load_image(image_input)
+        second_image = self._load_image(second_image_input) if second_image_input is not None else None
 
         # 1. Probabilidades del modelo entrenado
         classifier_probs = self.classifier.predict(image)
+        if second_image is not None:
+            second_probs = self.classifier.predict(second_image)
+            classifier_probs = {
+                cls_name: round((classifier_probs.get(cls_name, 0.0) + second_probs.get(cls_name, 0.0)) / 2.0, 4)
+                for cls_name in classifier_probs
+            }
 
         # 2. Análisis multimodal agronómico
         diagnostic_result = self.gemini.analyze_image(
             image=image,
             classifier_probs=classifier_probs,
-            context_notes=context_notes
+            context_notes=context_notes,
+            second_image=second_image
         )
 
         # 3. Adjuntar metadatos de las probabilidades cuantitativas locales para trazabilidad
         diagnostic_result["probabilidades_modelo_local"] = classifier_probs
+        diagnostic_result["corroborado_segundo_angulo"] = second_image is not None
 
         return diagnostic_result
 

@@ -48,11 +48,19 @@ def health_check():
 @app.post("/api/v1/diagnose/file", summary="Diagnosticar subiendo archivo de imagen (Recomendado para App Móvil)")
 async def diagnose_file(
     file: UploadFile = File(..., description="Fotografía tomada desde la cámara del móvil"),
+    second_angle_file: Optional[UploadFile] = File(None, description="Segunda fotografía opcional (ej. envés de la hoja)"),
     context_notes: Optional[str] = Form(None, description="Notas de campo (lugar, humedad, etc.)")
 ):
     try:
         contents = await file.read()
-        result = engine.diagnose(image_input=contents, context_notes=context_notes)
+        second_contents = await second_angle_file.read() if second_angle_file is not None else None
+        if second_contents is not None and len(second_contents) == 0:
+            second_contents = None
+        result = engine.diagnose(
+            image_input=contents,
+            context_notes=context_notes,
+            second_image_input=second_contents
+        )
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
