@@ -1,0 +1,10 @@
+# Dependencias exclusivas para entrenamiento y evaluación local
+-r requirements.txt
+
+torch>=2.2.0
+torchvision>=0.17.0
+onnx>=1.17.0
+onnxscript>=0.1.0
+scikit-learn>=1.6.0
+matplotlib>=3.10.0
+tqdm>=4.67.0
