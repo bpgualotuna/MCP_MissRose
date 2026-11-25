@@ -8,7 +8,7 @@ import io
 import base64
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
-from PIL import Image
+from PIL import Image, ImageOps
 
 from src.services.classifier_service import ClassifierService
 from src.services.gemini_service import GeminiService
@@ -20,27 +20,34 @@ class DiagnosticEngine:
         self.classifier = ClassifierService()
         self.gemini = GeminiService()
 
+    def _normalize_orientation(self, img: Image.Image) -> Image.Image:
+        """Corrige la rotación EXIF típica de cámaras de teléfonos móviles."""
+        try:
+            return ImageOps.exif_transpose(img)
+        except Exception:
+            return img
+
     def _load_image(self, image_input: Union[str, Path, bytes, Image.Image]) -> Image.Image:
         """
         Carga una imagen desde una ruta en disco, un string en base64, bytes crudos o un objeto PIL.
         """
         if isinstance(image_input, Image.Image):
-            return image_input
+            return self._normalize_orientation(image_input)
 
         if isinstance(image_input, (str, Path)):
             path = Path(image_input)
             if path.exists():
-                return Image.open(path)
+                return self._normalize_orientation(Image.open(path))
             # Si no existe como ruta de archivo, intentar decodificar como base64
             if isinstance(image_input, str):
                 cleaned = image_input
                 if "base64," in cleaned:
                     cleaned = cleaned.split("base64,")[1]
                 img_bytes = base64.b64decode(cleaned)
-                return Image.open(io.BytesIO(img_bytes))
+                return self._normalize_orientation(Image.open(io.BytesIO(img_bytes)))
 
         if isinstance(image_input, bytes):
-            return Image.open(io.BytesIO(image_input))
+            return self._normalize_orientation(Image.open(io.BytesIO(image_input)))
 
         raise ValueError("Formato de imagen no soportado o archivo no encontrado.")
 

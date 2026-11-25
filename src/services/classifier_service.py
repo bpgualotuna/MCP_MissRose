@@ -61,8 +61,10 @@ class ClassifierService:
         tensor = np.transpose(arr, (2, 0, 1))
         return np.expand_dims(tensor, axis=0)
 
-    def softmax(self, logits: np.ndarray) -> np.ndarray:
-        exp_logits = np.exp(logits - np.max(logits))
+    def softmax(self, logits: np.ndarray, temperature: float = 2.5) -> np.ndarray:
+        """Softmax con Temperature Scaling para evitar sobreconfianza extrema fuera de dominio."""
+        scaled = logits / temperature
+        exp_logits = np.exp(scaled - np.max(scaled))
         return exp_logits / np.sum(exp_logits)
 
     def predict(self, image: Image.Image) -> Dict[str, float]:

@@ -49,18 +49,25 @@ class GeminiService:
             )
         catalogo_str = "\n".join(resumen_catalogo)
 
-        return f"""Eres el Asistente Fitopatólogo Experto 'Mr. Rose', especializado en el diagnóstico y manejo agronómico del cultivo de rosas en Ecuador (Pichincha y Cotopaxi).
+        return f"""Eres la Dra. Miss Rose, Asistente Fitopatóloga Experta especializada en el diagnóstico y manejo agronómico del cultivo de rosas en Ecuador (Pichincha y Cotopaxi).
 
 BASE FITOPATOLÓGICA DE ECUADOR:
 {catalogo_str}
 
-REGLAS CRÍTICAS DE DIAGNÓSTICO:
-1. El modelo local ya calculó un vector de probabilidades iniciales. Debes tomarlo en cuenta pero verificar visualmente la imagen.
-2. Si la foto es ambigua, borrosa, o hay duda entre enfermedades parecidas:
-   - VELLO vs OÍDIO: Si se ve mancha en el haz pero no se aprecia el envés, DEBES solicitar una segunda foto enfocando el envés para buscar esporulación gris-violácea.
-   - BOTRYTIS: Si se sospecha moho gris en botón o pétalo pero no es concluyente, solicitar acercamiento macro a la base de pétalos o cáliz.
-   - ROYA vs MANCHA NEGRA: Si hay dudas tempranas, pedir foto del envés de hojas basales.
-3. Debes responder EXCLUSIVAMENTE con un objeto JSON válido con la siguiente estructura exacta:
+REGLAS CRÍTICAS DE DIAGNÓSTICO VISUAL (PRIORIDAD ABSOLUTA):
+1. PRIMACÍA VISUAL: Tu propia inspección visual directa de la fotografía tiene PRIORIDAD ABSOLUTA sobre el vector de probabilidades del clasificador local ONNX.
+2. SESGO CONOCIDO DEL MODELO LOCAL: El clasificador local ONNX fue entrenado mayoritariamente con hojas aisladas o fondos controlados/recortados; en fotos reales de celular con fondo natural de invernadero, suelo o manos, el modelo local suele equivocarse y sobrediagnosticar "botrytis" o confundir iluminación. Si tu observación visual contradice al modelo local, IGNORA el modelo local y confía en los signos reales que ves en la imagen.
+3. CLAVES VISUALES PARA DESEMPATE EN FOTOS REALES:
+   - BOTRYTIS: Ataca principalmente PÉTALOS Y BOTONES FLORALES (manchas café blandas/acuosas, moho o pelusa gris). NO diagnostiques botrytis en una hoja verde sana solo por el fondo.
+   - OÍDIO: Polvillo blanco o grisáceo harinoso SUPERFICIAL sobre hojas jóvenes, brotes o botones (haz y envés), a veces con enrollamiento foliar.
+   - VELLO (Mildiu velloso): Manchas ANGULOSAS púrpuras, rojizas o café delimitadas por las nervaduras en el haz; esporulación gris-violácea SOLO en el envés.
+   - ROYA: Pústulas elevadas/polvorientas de color NARANJA, amarillo o negro en el ENVÉS (y puntos amarillos frente a ellas en el haz).
+   - MANCHA NEGRA: Manchas circulares negras/marrón oscuro con BORDES PLUMOSOS/estrellados y halo amarillo alrededor en el haz.
+   - SANO: Tejido verde uniforme o pétalos limpios sin lesiones patológicas (no confundir brillos de luz, gotas limpias o tierra con enfermedad).
+4. AMBIGÜEDAD, FOTO LEJANA O DESENFOQUE:
+   - Si la foto está muy lejana, borrosa, oscura o no permite distinguir los signos con certeza, asigna confianza < 0.70, usa "no_determinable" (o la hipótesis más probable) y activa "requiere_segunda_foto": true indicando acercamiento al órgano afectado.
+   - Si hay mancha en el haz pero falta ver el envés para descartar Vello vs Oídio vs Roya, activa "requiere_segunda_foto": true pidiendo el envés foliar.
+5. Debes responder EXCLUSIVAMENTE con un objeto JSON válido con la siguiente estructura exacta:
 {{
   "diagnostico_probable": "nombre_canónico (sano, botrytis, oidio, vello, roya, mancha_negra, o no_determinable)",
   "nombre_comun": "Nombre legible de la enfermedad o estado sano",
@@ -103,27 +110,34 @@ REGLAS CRÍTICAS DE DIAGNÓSTICO:
             # Fallback en caso de no tener API Key configurada
             return self._heuristic_fallback(classifier_probs, has_second_image=has_second_image)
 
-        # Convertir imagen principal PIL a bytes JPEG
+        # Convertir imagen principal PIL a bytes JPEG (limitando lado mayor a 1600px para preservar detalle sin saturar red)
+        img_rgb = image.convert("RGB")
+        if max(img_rgb.size) > 1600:
+            img_rgb.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
         buffered = io.BytesIO()
-        image.convert("RGB").save(buffered, format="JPEG", quality=90)
+        img_rgb.save(buffered, format="JPEG", quality=92)
         img_bytes = buffered.getvalue()
 
         prompt_usuario = (
-            f"Analiza esta imagen de rosa cultivada en Ecuador.\n"
-            f"El clasificador cuantitativo local arrojó las siguientes probabilidades:\n"
+            f"Analiza visualmente esta fotografía real de rosa cultivada en Ecuador.\n"
+            f"Referencia orientativa del clasificador ONNX local (recuerda: tiene sesgo en fondos reales y tiende a sobrediagnosticar botrytis; prioriza siempre tu observación visual directa):\n"
             f"{json.dumps(classifier_probs, indent=2)}\n"
         )
         if context_notes:
             prompt_usuario += f"\nNotas contextuales del agricultor: {context_notes}\n"
 
+        last_error = None
         try:
             from google.genai import types
             request_contents = [
                 types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
             ]
             if second_image is not None:
+                sec_rgb = second_image.convert("RGB")
+                if max(sec_rgb.size) > 1600:
+                    sec_rgb.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
                 second_buffered = io.BytesIO()
-                second_image.convert("RGB").save(second_buffered, format="JPEG", quality=90)
+                sec_rgb.save(second_buffered, format="JPEG", quality=92)
                 second_img_bytes = second_buffered.getvalue()
                 request_contents.append(
                     types.Part.from_bytes(data=second_img_bytes, mime_type="image/jpeg")
@@ -137,20 +151,31 @@ REGLAS CRÍTICAS DE DIAGNÓSTICO:
             prompt_usuario += "\nProporciona el diagnóstico agronómico estructurado en formato JSON estricto."
             request_contents.append(prompt_usuario)
 
-            response = self.client.models.generate_content(
-                model="gemini-3.5-flash-lite",
-                contents=request_contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.build_system_prompt(),
-                    response_mime_type="application/json",
-                    temperature=0.2
-                )
-            )
+            # Intentar primero con el modelo multimodal más preciso y hacer fallback si hay saturación (503)
+            for model_name in ("gemini-3.8-flash", "gemini-3.5-flash-lite"):
+                try:
+                    response = self.client.models.generate_content(
+                        model=model_name,
+                        contents=request_contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=self.build_system_prompt(),
+                            response_mime_type="application/json",
+                            temperature=0.1
+                        )
+                    )
+                    raw_text = (response.text or "").strip()
+                    if raw_text.startswith("```"):
+                        raw_text = raw_text.strip("`").removeprefix("json").strip()
+                    result = json.loads(raw_text)
+                    if has_second_image:
+                        result["requiere_segunda_foto"] = False
+                    return result
+                except Exception as model_err:
+                    last_error = model_err
+                    print(f"[!] Falló modelo {model_name}: {model_err}")
+                    continue
 
-            result = json.loads(response.text)
-            if has_second_image:
-                result["requiere_segunda_foto"] = False
-            return result
+            raise last_error if last_error else RuntimeError("No se obtuvo respuesta de Gemini.")
         except Exception as e:
             print(f"[!] Error al llamar a Gemini: {e}. Activando motor heurístico de respaldo.")
             return self._heuristic_fallback(
